@@ -1,4 +1,4 @@
-cost
+Cost
 ====
 
-The "cost website" source code
+“成本”，UGC网站，为用户计算一件事情的成本
