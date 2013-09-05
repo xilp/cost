@@ -11,13 +11,17 @@ import (
 
 func main() {
 	t := NewTemplates("templates/", ".tp", "notfound", "entry")
-	Run(8088, "entrys/", ".sp", t)
+	debug := !(len(os.Args) > 1 && os.Args[1] == "release")
+	Run(8088, "entrys/", ".sp", t, debug)
 }
 
-func Run(port int, dir string, ext string, t *Template) {
+func Run(port int, dir string, ext string, t *Template, debug bool) {
 	handle := func(w http.ResponseWriter, req *http.Request) {
 		path := req.URL.Path[1:]
 		entry := LoadEntry(dir + path + ext)
+		if debug {
+			t.Load()
+		}
 		if entry == nil {
 			t.Rend(w, "notfound", nil)
 		} else {
@@ -33,7 +37,7 @@ func Run(port int, dir string, ext string, t *Template) {
 }
 
 type Entry struct {
-	content string
+	Content string
 }
 
 func LoadEntry(path string) *Entry {
@@ -52,20 +56,27 @@ func LoadEntry(path string) *Entry {
 
 type Template struct {
 	templ *template.Template
+	dir string
 	ext string
+	files []string
 }
 
 func NewTemplates(dir string, ext string, files ...string) *Template {
-	paths := make([]string, len(files))
-	for i, it := range files {
-		paths[i] = dir + it + ext
+	p := &Template{nil, dir, ext, files}
+	p.Load()
+	return p
+}
+
+func (p *Template) Load() {
+	p.templ = template.New("")
+	paths := make([]string, len(p.files))
+	for i, it := range p.files {
+		paths[i] = p.dir + it + p.ext
 	}
-	p := &Template{template.New(""), ext}
 	_, err := p.templ.ParseFiles(paths...)
 	if err != nil {
 		panic(err)
 	}
-	return p
 }
 
 func (p *Template) Rend(w io.Writer, name string, data interface{}) {
@@ -74,10 +85,3 @@ func (p *Template) Rend(w io.Writer, name string, data interface{}) {
 		panic(err)
 	}
 }
-
-
-
-
-
-
-
