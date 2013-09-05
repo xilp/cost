@@ -10,7 +10,7 @@ import (
 )
 
 func main() {
-	t := NewTemplates("templates/", ".tp", "notfound", "entry")
+	t := NewTemplates("templates/", ".htm", "notfound", "entry")
 	debug := !(len(os.Args) > 1 && os.Args[1] == "release")
 	Run(8088, "entrys/", ".sp", t, debug)
 }
