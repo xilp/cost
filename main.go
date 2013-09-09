@@ -4,8 +4,8 @@ import (
 	"bufio"
 	"flag"
 	"io"
-	"os"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"text/template"
@@ -14,56 +14,89 @@ import (
 func main() {
 	templates := flag.String("t", "templates", "template files dir")
 	entrys := flag.String("e", "entrys", "entry files dir")
-	debug := flag.Bool("d", true, "debug mode")
+	debug := flag.Bool("d", false, "debug mode")
 	port := flag.Int("p", 8088, "port")
 	flag.Parse()
 
 	render := NewTemplates(*templates, ".htm", "notfound", "entry")
-	err := Run(*debug, *port, *entrys, ".sp", render, []string{".htm", ".html"})
+	err := NewEntrys().Run(*debug, *port, *entrys, ".sp", render, []string{".htm", ".html"})
 	if err != nil {
 		println(err.Error())
 	}
 }
 
-func Run(debug bool, port int, dir string, ext string, t *Template, suffix []string) error {
-	normalize := func(url string) string {
+func NewEntrys() *Entrys {
+	return &Entrys{NewEntryCache()}
+}
+
+func (p *Entrys) Run(debug bool, port int, dir string, ext string, t *Template, suffix []string) error {
+	parse := func(url string) (string, string) {
 		path := url[1:]
 		for _, it := range suffix {
 			if strings.HasSuffix(strings.ToLower(path), it) {
-				path = path[:len(path) - len(it)]
+				path = path[:len(path)-len(it)]
 				break
 			}
 		}
-		return path
+		i := strings.LastIndex(path, "/")
+		if i > 0 {
+			return path[:i], path[i + 1:]
+		}
+		return path, ""
 	}
 
 	handle := func(w http.ResponseWriter, req *http.Request) {
-		path := normalize(req.URL.Path)
-		entry := LoadEntry(dir + "/" + path + ext)
+		path, op := parse(req.URL.Path)
+		path = dir + "/" + path + ext
+
+		var entry *Entry
 		if debug {
+			entry = LoadEntry(path)
 			t.Load()
-		}
-		if entry == nil {
-			t.Rend(w, "notfound", nil)
 		} else {
-			t.Rend(w, "entry", entry)
+			entry = p.cache.Load(path)
+		}
+
+		switch op {
+		case "update":
+			p.cache.Discard(path)
+		default:
+			if entry == nil {
+				t.Rend(w, "notfound", nil)
+			} else {
+				t.Rend(w, "entry", entry)
+			}
 		}
 	}
 
 	http.HandleFunc("/", handle)
-	return http.ListenAndServe(":" + strconv.Itoa(port), nil)
+	return http.ListenAndServe(":"+strconv.Itoa(port), nil)
 }
 
-type Entry struct {
-	Title string
-	Tags []string
-	Users []string
-	Costs []Cost
+type Entrys struct {
+	cache *EntryCache
 }
-type Cost struct {
-	Price int
-	User int
-	Tags []int
+
+func NewEntryCache() *EntryCache {
+	return &EntryCache{make(map[string]*Entry)}
+}
+
+func (p *EntryCache) Load(path string) *Entry {
+	entry, ok := p.entrys[path]
+	if ok {
+		return entry
+	}
+	entry = LoadEntry(path)
+	p.entrys[path] = entry
+	return entry
+}
+
+func (p *EntryCache) Discard(path string) {
+	delete(p.entrys, path)
+}
+
+type EntryCache struct {
+	entrys map[string]*Entry
 }
 
 func LoadEntry(path string) *Entry {
@@ -99,7 +132,7 @@ func LoadEntry(path string) *Entry {
 		if line[0] != '{' || line[len(line) - 1] != '}' {
 			raise("parse tags error", row)
 		}
-		line = line[1:len(line) - 1]
+		line = line[1 : len(line) - 1]
 		strs := strings.Split(line, ",")
 		tags := make([]int, len(strs))
 		for i, str := range strs {
@@ -151,11 +184,16 @@ func LoadEntry(path string) *Entry {
 	return entry
 }
 
-type Template struct {
-	templ *template.Template
-	dir string
-	ext string
-	files []string
+type Entry struct {
+	Title string
+	Tags  []string
+	Users []string
+	Costs []Cost
+}
+type Cost struct {
+	Price int
+	User  int
+	Tags  []int
 }
 
 func NewTemplates(dir string, ext string, files ...string) *Template {
@@ -177,16 +215,17 @@ func (p *Template) Load() {
 }
 
 func (p *Template) Rend(w io.Writer, name string, data interface{}) {
-	err := p.templ.ExecuteTemplate(w, name + p.ext, data)
+	err := p.templ.ExecuteTemplate(w, name+p.ext, data)
 	if err != nil {
 		panic(err)
 	}
 }
 
-type Scropes struct {
-	unscroped Parser
-	list []*Scrope
-	set map[string]*Scrope
+type Template struct {
+	templ *template.Template
+	dir   string
+	ext   string
+	files []string
 }
 
 func NewScropes(unscroped Parser) *Scropes {
@@ -203,7 +242,7 @@ func (p *Scropes) Add(begin string, end string, fun Parser) {
 	p.set[begin] = scrope
 }
 
-func (p *Scropes) Parse(file io.Reader)  {
+func (p *Scropes) Parse(file io.Reader) {
 	reader := bufio.NewReader(file)
 	stack := make([]*Scrope, 0)
 	for i := 0; ; i++ {
@@ -233,11 +272,14 @@ func (p *Scropes) Parse(file io.Reader)  {
 	}
 }
 
+type Scropes struct {
+	unscroped Parser
+	list      []*Scrope
+	set       map[string]*Scrope
+}
 type Scrope struct {
 	begin string
-	end string
-	fun Parser
+	end   string
+	fun   Parser
 }
-
 type Parser func(line string, row int)
-

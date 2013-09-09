@@ -1,23 +1,51 @@
 <html>
 <script src="http://code.jquery.com/jquery-latest.js"></script>
 <script>
-var users = [{{range .Users}}
-	"{{.}}",{{end}}
-]
-var tags = [{{range .Tags}}
-	"{{.}}",{{end}}
-]
-var costs = [{{range .Costs}}
-	{"price":{{.Price}},"user":{{.User}},"tags":[{{range .Tags}}{{.}},{{end}}]},{{end}}
-]
+function Costs(costs) {
+	var _t = this
+	_t.users = [{{range .Users}}
+		"{{.}}", {{end}}
+	]
+	_t.tags = [{{range .Tags}}
+		"{{.}}", {{end}}
+	]
+	_t.costs = [{{range .Costs}}
+		{price:{{.Price}},user:{{.User}},tags:[{{range .Tags}}{{.}},{{end}}]},{{end}}
+	]
 
-function rend() {
-	$("#costs").html("")
+	_t._pad = {
+		costs:costs,
+	}
+	_t._inited = false
+	_t._init = function() {
+		if (_t._inited)
+			return
+		for (var k in _t._pad)
+			_t._pad[k] = $(_t._pad[k])
+		_t._inited = true
+	}
+
+	_t.rend = function() {
+		_t._init()
+		var costs = _t.costs
+		var sum = 0
+		for (var i in costs) {
+			var cost = costs[i]
+			sum += cost.price
+		}
+		_t._pad.costs.html(sum / costs.length)
+	}
 }
+
+$(function() {
+	C = new Costs("#costs")
+	C.rend()
+})
 </script>
-<body onload="rend()">
-</body>
+
+<body>
 {{.Title}}<br/>
 <br/><hr/><br/>
 <div id="costs"></div>
+</body>
 </html>
