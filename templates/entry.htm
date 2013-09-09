@@ -2,5 +2,13 @@
 <body>
 </body>
 Entry:
-{{.Content}}
+{{.Title}}<br/>
+<br/><hr/><br/>
+{{range .Users}}{{.}}<br/>{{end}}
+<br/><hr/><br/>
+{{range .Tags}}{{.}}<br/>{{end}}
+<br/><hr/><br/>
+{{range .Costs}}
+{{.Price}} {{.User}}<{{range .Tags}}{{.}} {{end}}><br/>
+{{end}}
 </html>
