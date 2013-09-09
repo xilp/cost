@@ -1,14 +1,23 @@
 <html>
-<body>
+<script src="http://code.jquery.com/jquery-latest.js"></script>
+<script>
+var users = [{{range .Users}}
+	"{{.}}",{{end}}
+]
+var tags = [{{range .Tags}}
+	"{{.}}",{{end}}
+]
+var costs = [{{range .Costs}}
+	{"price":{{.Price}},"user":{{.User}},"tags":[{{range .Tags}}{{.}},{{end}}]},{{end}}
+]
+
+function rend() {
+	$("#costs").html("")
+}
+</script>
+<body onload="rend()">
 </body>
-Entry:
 {{.Title}}<br/>
 <br/><hr/><br/>
-{{range .Users}}{{.}}<br/>{{end}}
-<br/><hr/><br/>
-{{range .Tags}}{{.}}<br/>{{end}}
-<br/><hr/><br/>
-{{range .Costs}}
-{{.Price}} {{.User}}<{{range .Tags}}{{.}} {{end}}><br/>
-{{end}}
+<div id="costs"></div>
 </html>
