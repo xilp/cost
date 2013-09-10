@@ -1,7 +1,32 @@
 <html>
+<style>
+body{
+font-family:Helvetica, Arial, "Hiragino Sans GB";
+color:darkblue;
+margin:0;
+padding:0;
+}
+.title{
+font-size:4em;
+}
+.user,.tag{
+background:#eee;
+padding:5px;
+margin:5px;
+}
+.tag{
+cursor:pointer;
+}
+.sel{
+background:lightblue;
+}
+.hide{
+display:none;
+}
+</style>
 <script src="http://code.jquery.com/jquery-latest.js"></script>
 <script>
-function Costs(costs) {
+function Costs(costs, tags, users, sels, hide) {
 	var _t = this
 	_t.users = [{{range .Users}}
 		"{{.}}", {{end}}
@@ -13,39 +38,105 @@ function Costs(costs) {
 		{price:{{.Price}},user:{{.User}},tags:[{{range .Tags}}{{.}},{{end}}]},{{end}}
 	]
 
-	_t._pad = {
+	_t._p = {
 		costs:costs,
+		tags:tags,
+		users:users,
 	}
+	_t._sels = []
 	_t._inited = false
+
 	_t._init = function() {
 		if (_t._inited)
 			return
-		for (var k in _t._pad)
-			_t._pad[k] = $(_t._pad[k])
+		for (var k in _t._p)
+			_t._p[k] = $(_t._p[k])
+		for (var i in _t.tags)
+			_t._sels[i] = true
+		_t._p.tags.each(function(i, e) {
+			$(e).click(function() {
+				$(this).toggleClass(sels)
+				_t.togsel(i)
+			})
+		})
 		_t._inited = true
+	}
+
+	_t.sel = function(tag) {
+		_t._sels[tag] = true
+		_t.rend()
+	}
+	_t.unsel = function(tag) {
+		_t._sels[tag] = false
+		for (var i in _t._sels)
+			if (_t._sels[i]) {
+				_t.rend()
+				return
+			}
+		for (var i in _t.tags)
+			_t._sels[i] = true
+		_t._p.tags.each(function(i, e) {
+			$(e).addClass(sels)
+		})
+		_t.rend()
+	}
+	_t.togsel = function(tag) {
+		if (_t._sels[tag])
+			_t.unsel(tag)
+		else
+			_t.sel(tag)
 	}
 
 	_t.rend = function() {
 		_t._init()
-		var costs = _t.costs
 		var sum = 0
-		for (var i in costs) {
-			var cost = costs[i]
-			sum += cost.price
+		var count = 0
+		var users = []
+		for (var i in _t.costs) {
+			var cost = _t.costs[i]
+			var match = false
+			for (var i in cost.tags) {
+				if (_t._sels[cost.tags[i]]) {
+					match = true
+					break
+				}
+			}
+			if (match || cost.tags.length == 0) {
+				sum += cost.price
+				count += 1
+				users[cost.user] = true
+			}
 		}
-		_t._pad.costs.html(sum / costs.length)
+		_t._p.users.each(function(i, e) {
+			if (users[i])
+				$(e).removeClass(hide)
+			else
+				$(e).addClass(hide)
+		})
+		_t._p.costs.html(sum/count)
 	}
 }
 
 $(function() {
-	C = new Costs("#costs")
+	C = new Costs("#price", ".tag", ".user", "sel", "hide")
 	C.rend()
 })
 </script>
 
 <body>
-{{.Title}}<br/>
+<div class="title">{{.Title}}: <span id="price"></span></div>
+<hr/><br/>
+<div id="tags">{{range .Tags}}<span class="tag sel">{{.}}</span> {{end}}</div>
 <br/><hr/><br/>
-<div id="costs"></div>
+<div id="users">{{range .Users}}<span class="user">{{.}}</span> {{end}}</div>
+<br/><hr/><br/>
+<div><form >
+我也买过：<br/><br/>
+价格<input/><br/>
+昵称<input/><br/>
+标签<input/><br/>
+<br/>
+<input type="submit" value="  提交  "/>
+</form></div>
 </body>
 </html>
