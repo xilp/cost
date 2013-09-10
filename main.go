@@ -40,7 +40,7 @@ func (p *Entrys) Run(debug bool, port int, dir string, ext string, t *Template, 
 		}
 		i := strings.LastIndex(path, "/")
 		if i > 0 {
-			return path[:i], path[i + 1:]
+			return path[:i], path[i+1:]
 		}
 		return path, ""
 	}
@@ -129,10 +129,10 @@ func LoadEntry(path string) *Entry {
 
 	tagsf := func(line string, row int) []int {
 		line = strings.TrimSpace(line)
-		if line[0] != '{' || line[len(line) - 1] != '}' {
+		if line[0] != '{' || line[len(line)-1] != '}' {
 			raise("parse tags error", row)
 		}
-		line = line[1 : len(line) - 1]
+		line = line[1 : len(line)-1]
 		strs := strings.Split(line, ",")
 		tags := make([]int, len(strs))
 		for i, str := range strs {
@@ -162,7 +162,7 @@ func LoadEntry(path string) *Entry {
 		return Cost{price, user, tags}
 	}
 
-	unscropedf := func(line string, row int) {
+	unScopedf := func(line string, row int) {
 		if len(entry.Title) == 0 {
 			entry.Title = line
 		} else {
@@ -176,10 +176,10 @@ func LoadEntry(path string) *Entry {
 	}
 	defer file.Close()
 
-	scropes := NewScropes(unscropedf)
-	scropes.Add("{", "}", tagf)
-	scropes.Add("[", "]", userf)
-	scropes.Parse(file)
+	Scopes := NewScopes(unScopedf)
+	Scopes.Add("{", "}", tagf)
+	Scopes.Add("[", "]", userf)
+	Scopes.Parse(file)
 
 	return entry
 }
@@ -228,23 +228,23 @@ type Template struct {
 	files []string
 }
 
-func NewScropes(unscroped Parser) *Scropes {
-	return &Scropes{
-		unscroped,
-		make([]*Scrope, 0),
-		make(map[string]*Scrope),
+func NewScopes(unScoped Parser) *Scopes {
+	return &Scopes{
+		unScoped,
+		make([]*Scope, 0),
+		make(map[string]*Scope),
 	}
 }
 
-func (p *Scropes) Add(begin string, end string, fun Parser) {
-	scrope := &Scrope{begin, end, fun}
-	p.list = append(p.list, scrope)
-	p.set[begin] = scrope
+func (p *Scopes) Add(begin string, end string, fun Parser) {
+	Scope := &Scope{begin, end, fun}
+	p.list = append(p.list, Scope)
+	p.set[begin] = Scope
 }
 
-func (p *Scropes) Parse(file io.Reader) {
+func (p *Scopes) Parse(file io.Reader) {
 	reader := bufio.NewReader(file)
-	stack := make([]*Scrope, 0)
+	stack := make([]*Scope, 0)
 	for i := 0; ; i++ {
 		data, prefix, err := reader.ReadLine()
 		if prefix {
@@ -257,14 +257,14 @@ func (p *Scropes) Parse(file io.Reader) {
 			panic(err)
 		}
 		line := strings.TrimSpace(string(data))
-		if scrope, ok := p.set[line]; ok {
-			stack = append(stack, scrope)
+		if Scope, ok := p.set[line]; ok {
+			stack = append(stack, Scope)
 		} else if len(stack) == 0 {
-			p.unscroped(line, i)
+			p.unScoped(line, i)
 		} else {
-			last := stack[len(stack) - 1]
+			last := stack[len(stack)-1]
 			if line == last.end {
-				stack = stack[:len(stack) - 1]
+				stack = stack[:len(stack)-1]
 			} else {
 				last.fun(line, i)
 			}
@@ -272,12 +272,12 @@ func (p *Scropes) Parse(file io.Reader) {
 	}
 }
 
-type Scropes struct {
-	unscroped Parser
-	list      []*Scrope
-	set       map[string]*Scrope
+type Scopes struct {
+	unScoped Parser
+	list     []*Scope
+	set      map[string]*Scope
 }
-type Scrope struct {
+type Scope struct {
 	begin string
 	end   string
 	fun   Parser
