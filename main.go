@@ -18,7 +18,7 @@ func main() {
 	port := flag.Int("p", 8088, "port")
 	flag.Parse()
 
-	render := NewTemplates(*templates, ".htm", "notfound", "entry")
+	render := NewTemplates(*templates, ".htm", "404", "entry")
 	err := NewEntrys().Run(*debug, *port, *entrys, ".sp", render, []string{".htm", ".html"})
 	if err != nil {
 		println(err.Error())
@@ -62,7 +62,7 @@ func (p *Entrys) Run(debug bool, port int, dir string, ext string, t *Template, 
 			p.cache.Discard(path)
 		default:
 			if entry == nil {
-				t.Rend(w, "notfound", nil)
+				t.Rend(w, "404", nil)
 			} else {
 				t.Rend(w, "entry", entry)
 			}
