@@ -2,65 +2,133 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"flag"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"text/template"
 )
 
 func main() {
+	admin := flag.String("a", "1234", "admin password")
 	templates := flag.String("t", "templates", "template files dir")
 	entrys := flag.String("e", "entrys", "entry files dir")
 	debug := flag.Bool("d", false, "debug mode")
 	port := flag.Int("p", 8088, "port")
 	flag.Parse()
 
+	db := NewFileDB(*entrys, ".sp")
 	render := NewTemplates(*templates, ".htm", "404", "entry")
-	err := NewEntrys().Run(*debug, *port, *entrys, ".sp", render, []string{".htm", ".html"})
+	err := NewEntrys().Run(*admin, *debug, *port, db, render, []string{".htm", ".html"})
 	if err != nil {
 		println(err.Error())
 	}
 }
 
 func NewEntrys() *Entrys {
-	return &Entrys{NewEntryCache()}
+	return &Entrys{NewEntryCache(), NewEntryWriter(), NewLockers()}
 }
 
-func (p *Entrys) Run(debug bool, port int, dir string, ext string, t *Template, suffix []string) error {
+func (p *Entrys) Run(admin string, debug bool, port int, db DB, t *Template, suffix []string) error {
 	parse := func(url string) (string, string) {
-		path := url[1:]
+		id := url[1:]
+		if id[0] == '_' {
+			return "", id[1:]
+		}
 		for _, it := range suffix {
-			if strings.HasSuffix(strings.ToLower(path), it) {
-				path = path[:len(path)-len(it)]
+			if strings.HasSuffix(strings.ToLower(id), it) {
+				id = id[:len(id) - len(it)]
 				break
 			}
 		}
-		i := strings.LastIndex(path, "/")
+		i := strings.LastIndex(id, "/")
 		if i > 0 {
-			return path[:i], path[i+1:]
+			return id[:i], id[i + 1:]
 		}
-		return path, ""
+		return id, ""
 	}
 
-	handle := func(w http.ResponseWriter, req *http.Request) {
-		path, op := parse(req.URL.Path)
-		path = dir + "/" + path + ext
-
-		var entry *Entry
+	load := func(id string) *Entry {
 		if debug {
-			entry = LoadEntry(path)
+			entry := LoadEntry(id, db)
 			t.Load()
+			return entry
 		} else {
-			entry = p.cache.Load(path)
+			return p.cache.Load(id, db)
 		}
+	}
+
+	write := func(id string, entry *Entry, req *http.Request) {
+		req.ParseForm()
+		get := func(key string) string {
+			val := req.Form[key]
+			if len(val) == 0 {
+				return ""
+			}
+			return val[0]
+		}
+
+		title := get("title")
+		price, err := strconv.Atoi(get("price"))
+		if err != nil {
+			panic(err)
+		}
+		tags := strings.Split(get("tags"), ",")
+		user := get("user")
+
+		if debug {
+			WriteEntry(id, db, entry, title, price, tags, user)
+		} else {
+			p.writer.Write(id, db, entry, title, price, tags, user)
+		}
+	}
+
+	sysop := func(w http.ResponseWriter, req *http.Request, op string) {
+		req.ParseForm()
+		if len(req.Form["phrase"]) == 0 || admin != req.Form["phrase"][0] {
+			w.Write([]byte("wrong phrase"))
+			return
+		}
+		switch op {
+		case "exit":
+			if len(req.Form["phrase"]) > 0 && admin == req.Form["phrase"][0] {
+				os.Exit(0)
+			}
+		}
+	}
+	
+	valid := func(id string) bool {
+		return true
+	}
+
+	invoke := func(w http.ResponseWriter, req *http.Request) {
+		id, op := parse(req.URL.Path)
+		if len(id) == 0{
+			sysop(w, req, op)
+			return
+		}
+		if !valid(id) {
+			panic("invalid id")
+		}
+
+		p.locker.Lock(id)
+		defer p.locker.Unlock(id)
 
 		switch op {
 		case "update":
-			p.cache.Discard(path)
+			p.cache.Discard(id)
+			w.Write([]byte("ok"))
+		case "edit":
+			entry := load(id)
+			write(id, entry, req)
+			w.Write([]byte("ok"))
 		default:
+			entry := load(id)
 			if entry == nil {
 				t.Rend(w, "404", nil)
 			} else {
@@ -69,119 +137,234 @@ func (p *Entrys) Run(debug bool, port int, dir string, ext string, t *Template, 
 		}
 	}
 
+	handle := func(w http.ResponseWriter, req *http.Request) {
+		defer func() {
+			if debug {
+				return
+			}
+			if err := recover(); err != nil {
+				println(fmt.Sprintf("%v", err))
+			}
+		}()
+		invoke(w, req)
+	}
+
 	http.HandleFunc("/", handle)
-	return http.ListenAndServe(":"+strconv.Itoa(port), nil)
+	return http.ListenAndServe(":" + strconv.Itoa(port), nil)
 }
 
 type Entrys struct {
 	cache *EntryCache
+	writer *EntryWriter
+	locker *Lockers
 }
 
 func NewEntryCache() *EntryCache {
-	return &EntryCache{make(map[string]*Entry)}
+	return &EntryCache{entrys:make(map[string]*Entry)}
 }
 
-func (p *EntryCache) Load(path string) *Entry {
-	entry, ok := p.entrys[path]
+func (p *EntryCache) Load(id string, db DB) *Entry {
+	entry, ok := p.entrys[id]
 	if ok {
 		return entry
 	}
-	entry = LoadEntry(path)
-	p.entrys[path] = entry
+	entry = LoadEntry(id, db)
+	p.entrys[id] = entry
 	return entry
 }
 
-func (p *EntryCache) Discard(path string) {
-	delete(p.entrys, path)
+func (p *EntryCache) Discard(id string) {
+	delete(p.entrys, id)
 }
 
 type EntryCache struct {
 	entrys map[string]*Entry
+	lock sync.Mutex
 }
 
-func LoadEntry(path string) *Entry {
-	entry := &Entry{}
-	tagi := map[string]int{}
-	useri := map[string]int{}
+func NewEntryWriter() *EntryWriter {
+	return &EntryWriter{}
+}
 
-	raise := func(msg interface{}, row int) {
+func (p *EntryWriter) Write(id string, db DB, entry *Entry, title string, price int, tags []string, user string) {
+	WriteEntry(id, db, entry, title, price, tags, user)
+}
+
+type EntryWriter struct {
+}
+
+func LoadEntry(id string, db DB) *Entry {
+	entry := &Entry{}
+	tagi := 0
+	useri := 0
+	row := 0
+
+	raise := func(msg string) {
+		panic(msg + " #" + id + ":" + strconv.Itoa(row + 1))
 	}
 
-	tagf := func(line string, row int) {
+	atoi := func(s string) int {
+		n, err := strconv.Atoi(s)
+		if err != nil {
+			raise(err.Error())
+		}
+		return n
+	}
+
+	tagf := func(line string) {
 		segs := strings.Fields(line)
 		if len(segs) != 2 {
-			raise("parse tag line error", row)
+			raise("parse tag line error")
 		}
 		idx, tag := segs[0], segs[1]
-		tagi[idx] = len(entry.Tags)
+		if tagi != atoi(idx) || tagi != len(entry.Tags) {
+			raise("tag index error")
+		}
 		entry.Tags = append(entry.Tags, tag)
+		tagi += 1
 	}
 
-	userf := func(line string, row int) {
+	userf := func(line string) {
 		segs := strings.Fields(line)
 		if len(segs) != 2 {
-			raise("parse user line error", row)
+			raise("parse user line error")
 		}
 		idx, user := segs[0], segs[1]
-		useri[idx] = len(entry.Users)
+		if useri != atoi(idx) || useri != len(entry.Users) {
+			raise("user index error")
+		}
 		entry.Users = append(entry.Users, user)
+		useri += 1
 	}
 
-	tagsf := func(line string, row int) []int {
-		line = strings.TrimSpace(line)
-		if line[0] != '{' || line[len(line)-1] != '}' {
-			raise("parse tags error", row)
-		}
-		line = line[1 : len(line)-1]
+	tagsf := func(line string) []int {
 		strs := strings.Split(line, ",")
 		tags := make([]int, len(strs))
-		for i, str := range strs {
-			tag, ok := tagi[str]
-			if !ok {
-				raise("parse tag error", row)
-			}
-			tags[i] = tag
+		for i, it := range strs {
+			tags[i] = atoi(it)
 		}
 		return tags
 	}
 
-	costf := func(line string, row int) Cost {
+	costf := func(line string) Cost {
 		segs := strings.Fields(line)
 		if len(segs) != 3 {
-			raise("parse cost line error", row)
+			raise("parse cost line error")
 		}
-		price, err := strconv.Atoi(segs[0])
-		if err != nil {
-			raise("parse price error", row)
-		}
-		user, ok := useri[segs[1]]
-		if !ok {
-			raise("parse user error", row)
-		}
-		tags := tagsf(segs[2], row)
-		return Cost{price, user, tags}
+		return Cost{atoi(segs[0]), atoi(segs[1]), tagsf(segs[2])}
 	}
 
-	unScopedf := func(line string, row int) {
-		if len(entry.Title) == 0 {
-			entry.Title = line
-		} else {
-			entry.Costs = append(entry.Costs, costf(line, row))
-		}
-	}
-
-	file, err := os.Open(path)
-	if err != nil {
+	file := db.Get(id)
+	if file == nil {
 		return nil
 	}
 	defer file.Close()
+	reader := bufio.NewReader(file)
 
-	Scopes := NewScopes(unScopedf)
-	Scopes.Add("{", "}", tagf)
-	Scopes.Add("[", "]", userf)
-	Scopes.Parse(file)
+	for ; ; row++ {
+		data, prefix, err := reader.ReadLine()
+		if prefix {
+			panic("buffer too small")
+		}
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			panic(err)
+		}
+		if len(data) == 0 {
+			continue
+		}
+		line := strings.TrimSpace(string(data))
 
+		switch line[0] {
+		case '#':
+			entry.Title = line[1:]
+		case '$':
+			tagf(line[1:])
+		case '*':
+			userf(line[1:])
+		default:
+			entry.Costs = append(entry.Costs, costf(line))
+		}
+	}
 	return entry
+}
+
+func WriteEntry(id string, db DB, entry *Entry, title string, price int, tags []string, user string) {
+	write := func(data []byte) {
+		file := db.Append(id)
+		defer file.Close()
+		_, err := file.Write(data)
+		if err != nil {
+			panic(err)
+		}
+	}
+
+	str := strconv.Itoa
+	strs := func(ints []int) []string {
+		r := make([]string, len(ints))
+		for i, it := range ints {
+			r[i] = str(it)
+		}
+		return r
+	}
+
+	buf := new(bytes.Buffer)
+
+	if entry == nil {
+		if len(title) == 0 {
+			panic("must have title")
+		}
+		entry = &Entry{}
+	}
+
+	if len(title) != 0 {
+		if title[0] == '#' {
+			panic("# not allow")
+		}
+		buf.WriteString("#" + title + "\n")
+	}
+
+	cost := Cost{}
+	cost.User = -1
+	for i, it := range entry.Users {
+		if it == user {
+			cost.User = i
+		}
+	}
+	if cost.User < 0 {
+		idx := len(entry.Users)
+		cost.User = idx
+		entry.Users = append(entry.Users, user)
+		buf.WriteString("*" + str(idx) + " " + user + "\n")
+	}
+
+	tagi := map[string]int{}
+	for i, it := range entry.Tags {
+		tagi[it] = i
+	}
+
+	newt := map[string]int{}
+	for _, it := range tags {
+		if i, ok := tagi[it]; ok {
+			cost.Tags = append(cost.Tags, i)
+		} else {
+			idx := len(entry.Tags)
+			cost.Tags = append(cost.Tags, idx)
+			entry.Tags = append(entry.Tags, it)
+			newt[it] = idx
+		}
+	}
+	for k, v := range newt {
+		buf.WriteString("$" + str(v) + " " + k + "\n")
+	}
+
+	entry.Costs = append(entry.Costs, cost)
+	buf.WriteString(str(price) + " " + str(cost.User) + " ")
+	buf.WriteString(" " + strings.Join(strs(cost.Tags), ",") + "\n")
+
+	write(buf.Bytes())
 }
 
 type Entry struct {
@@ -228,58 +411,76 @@ type Template struct {
 	files []string
 }
 
-func NewScopes(unScoped Parser) *Scopes {
-	return &Scopes{
-		unScoped,
-		make([]*Scope, 0),
-		make(map[string]*Scope),
+func NewFileDB(dir string, ext string) DB {
+	return &FileDB{dir, ext}
+}
+
+func (p *FileDB) Get(id string) io.ReadCloser {
+	path := p.dir + "/" + id + p.ext
+	file, err := os.Open(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		panic(err)
+	}
+	return file
+}
+
+func (p *FileDB) Append(id string) io.WriteCloser {
+	path := p.dir + "/" + id + p.ext
+	file, err := os.OpenFile(path, os.O_RDWR | os.O_APPEND | os.O_CREATE, 0660)
+	if err != nil {
+		panic(err)
+	}
+	return file
+}
+
+type FileDB struct {
+	dir string
+	ext string
+}
+
+type DB interface {
+	Get(id string) io.ReadCloser
+	Append(id string) io.WriteCloser
+}
+
+func NewLockers() *Lockers {
+	return &Lockers{
+		lockeds: make(map[string]int),
+		lockers: make([]*sync.Mutex, 0),
 	}
 }
 
-func (p *Scopes) Add(begin string, end string, fun Parser) {
-	Scope := &Scope{begin, end, fun}
-	p.list = append(p.list, Scope)
-	p.set[begin] = Scope
+type Lockers struct {
+	lockeds map[string]int
+	lockers []*sync.Mutex
+	locker sync.Mutex
 }
 
-func (p *Scopes) Parse(file io.Reader) {
-	reader := bufio.NewReader(file)
-	stack := make([]*Scope, 0)
-	for i := 0; ; i++ {
-		data, prefix, err := reader.ReadLine()
-		if prefix {
-			panic("buffer too small")
+func (p *Lockers) Lock(id string) {
+	get := func() *sync.Mutex {
+		p.locker.Lock()
+		defer p.locker.Unlock()
+		idx, ok := p.lockeds[id]
+		if !ok {
+			idx = len(p.lockers)
+			p.lockers = append(p.lockers, new(sync.Mutex))
+			p.lockeds[id] = idx
 		}
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			panic(err)
-		}
-		line := strings.TrimSpace(string(data))
-		if Scope, ok := p.set[line]; ok {
-			stack = append(stack, Scope)
-		} else if len(stack) == 0 {
-			p.unScoped(line, i)
-		} else {
-			last := stack[len(stack)-1]
-			if line == last.end {
-				stack = stack[:len(stack)-1]
-			} else {
-				last.fun(line, i)
-			}
-		}
+		return p.lockers[idx]
 	}
+	get().Lock()
 }
 
-type Scopes struct {
-	unScoped Parser
-	list     []*Scope
-	set      map[string]*Scope
+func (p *Lockers) Unlock(id string) {
+	get := func() *sync.Mutex {
+		p.locker.Lock()
+		defer p.locker.Unlock()
+		idx, _ := p.lockeds[id]
+		return p.lockers[idx]
+	}
+	get().Unlock()
 }
-type Scope struct {
-	begin string
-	end   string
-	fun   Parser
-}
-type Parser func(line string, row int)
+
