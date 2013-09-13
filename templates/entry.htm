@@ -24,7 +24,7 @@ background:lightblue;
 display:none;
 }
 </style>
-<script src="http://code.jquery.com/jquery-latest.js"></script>
+<script src="http://lib.sinaapp.com/js/jquery/1.9.1/jquery-1.9.1.min.js"></script>
 <script>
 function Costs(costs, tags, users, sels, hide) {
 	var _t = this
@@ -73,6 +73,8 @@ function Costs(costs, tags, users, sels, hide) {
 				_t.rend()
 				return
 			}
+		return
+		// TODO
 		for (var i in _t.tags)
 			_t._sels[i] = true
 		_t._p.tags.each(function(i, e) {
@@ -117,9 +119,36 @@ function Costs(costs, tags, users, sels, hide) {
 	}
 }
 
+function submitter() {
+	var form = $("#append")
+	var tip = $("#appended")
+	var price = $("#aprice")
+	var user = $("#auser")
+	var tag = $("#atag")
+	form.submit(function(){
+		tip.empty()
+		var url = document.location.href + "/edit?price=" + price.val() + "&user=" + user.val()
+		alert(url)
+		$.ajax({
+			url:url,
+			error:function(r, s, e) {
+				tip.text(s)
+			},
+			success:function(data) {
+				if (data != "ok") {
+					tip.text(data)
+					return
+				}
+			}
+		})
+		return false
+	})
+}
+
 $(function() {
 	C = new Costs("#price", ".tag", ".user", "sel", "hide")
 	C.rend()
+	submitter()
 })
 </script>
 
@@ -130,13 +159,13 @@ $(function() {
 <br/><hr/><br/>
 <div id="users">{{range .Users}}<span class="user">{{.}}</span> {{end}}</div>
 <br/><hr/><br/>
-<div><form >
+<div><form id="append">
 我也买过：<br/><br/>
-价格<input/><br/>
-昵称<input/><br/>
-标签<input/><br/>
+价格<input id="aprice"/><br/>
+昵称<input id="auser"/><br/>
+标签<input id="atags"/><br/>
 <br/>
-<input type="submit" value="  提交  "/>
+<input type="submit" value="  提交  "/> <span id="appended"></span>
 </form></div>
 </body>
 </html>

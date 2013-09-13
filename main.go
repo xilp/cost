@@ -23,7 +23,7 @@ func main() {
 	flag.Parse()
 
 	db := NewFileDB(*entrys, ".sp")
-	render := NewTemplates(*templates, ".htm", "404", "entry")
+	render := NewTemplates(*templates, ".htm", "index", "404", "entry")
 	err := NewEntrys().Run(*admin, *debug, *port, db, render, []string{".htm", ".html"})
 	if err != nil {
 		println(err.Error())
@@ -107,6 +107,11 @@ func (p *Entrys) Run(admin string, debug bool, port int, db DB, t *Template, suf
 	}
 
 	invoke := func(w http.ResponseWriter, req *http.Request) {
+		if req.URL.Path == "/" {
+			t.Rend(w, "index", nil)
+			return
+		}
+
 		id, op := parse(req.URL.Path)
 		if len(id) == 0{
 			sysop(w, req, op)
@@ -248,6 +253,9 @@ func LoadEntry(id string, db DB) *Entry {
 
 	costf := func(line string) Cost {
 		segs := strings.Fields(line)
+		if len(segs) == 2 {
+			return Cost{atoi(segs[0]), atoi(segs[1]), []int{}}
+		}
 		if len(segs) != 3 {
 			raise("parse cost line error")
 		}
@@ -347,6 +355,9 @@ func WriteEntry(id string, db DB, entry *Entry, title string, price int, tags []
 
 	newt := map[string]int{}
 	for _, it := range tags {
+		if len(it) == 0 {
+			continue
+		}
 		if i, ok := tagi[it]; ok {
 			cost.Tags = append(cost.Tags, i)
 		} else {
